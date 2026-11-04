@@ -224,6 +224,72 @@
   }
   function tryCustom(spec) { if (!spec || !spec.item) return null; const items = qa(document, spec.item); const posts = fromItems(items, spec, 'custom'); return { name: 'custom', note: spec.item, posts }; }
 
+  // ---------- JSON-feed adapters (ported from leakwatch p_inc_json / p_ransomhouse_json / p_akira_json) ----------
+  // Leak sites that serve their victim list as JSON (the API URL shows raw JSON, or the SPA holds it in a global /
+  // <script>).  These parse the three known shapes, then fall back to a generic nested walk, so any JSON feed of
+  // victim objects - even one whose name is nested under a child object - becomes cards like every other site.
+  const _dec = s => { try { return decodeURIComponent(String(s == null ? '' : s)); } catch (e) { return String(s == null ? '' : s); } };
+  const _akUnwrap = s => clean(String(s == null ? '' : s).replace(/\[\[[^\]]*\]([^\]]*)\]/g, '$1').replace(/\[\[|\]\]/g, ''));
+  function _incVictims(data) {
+    const anns = data && data.payload && data.payload.announcements;
+    if (!Array.isArray(anns)) return null;
+    const out = anns.map(a => { const c = a.company || {}; const name = c.company_name || c.name || a.title; if (!name) return null;
+      const d = Array.isArray(a.description) ? a.description.filter(x => typeof x === 'string').map(_dec).join(' ') : (typeof a.description === 'string' ? _dec(a.description) : '');
+      const desc = [(a.categories || []).join(', '), c.country || '', c.revenue ? 'revenue ' + c.revenue : '', d].filter(Boolean).join(' · ');
+      return { el: null, data: a, title: clean(_dec(name)), url: a._id ? '#' + a._id : null, dateText: a.createdAt != null ? String(a.createdAt) : '', description: clean(desc).slice(0, 1500), timerLine: '' }; }).filter(Boolean);
+    return out.length ? out : null;
+  }
+  function _rhVictims(data) {
+    const arr = data && data.data; if (!Array.isArray(arr)) return null;
+    const out = arr.filter(it => it && it.display !== 'animated' && it.header).map(it => {
+      const desc = [it.status || '', it.action || '', it.published ? 'published ' + it.published : '', it.revenue || '', it.info || ''].filter(Boolean).join(' · ');
+      return { el: null, data: it, title: clean(it.header), url: it.url || null, dateText: it.actionDate != null ? String(it.actionDate) : '', description: clean(desc).slice(0, 1500), timerLine: '' }; });
+    return out.length ? out : null;
+  }
+  function _akVictims(data) {
+    const arr = data && data.objects; if (!Array.isArray(arr)) return null;
+    const out = arr.filter(x => x && typeof x === 'object').map(it => { let title, desc, url = null;
+      if (it.name != null) { title = _akUnwrap(it.name); desc = _akUnwrap(it.desc); const m = /(https?:\/\/[^\]\s"']+)/.exec(it.url || ''); url = m ? m[1] : null; }
+      else { title = _akUnwrap(it.title); desc = 'announcement · ' + _akUnwrap(it.content); }
+      if (!title) return null;
+      return { el: null, data: it, title, url, dateText: it.date != null ? String(it.date) : '', description: clean(desc).slice(0, 1500), timerLine: '' }; }).filter(Boolean);
+    return out.length ? out : null;
+  }
+  function _genericJsonVictims(data) {   // find an array of victim-like objects anywhere, name direct or nested one level
+    let best = null;
+    const nameOf = o => { for (const k of JSON_KEYS) if (typeof o[k] === 'string' && o[k].trim()) return o[k];
+      for (const v of Object.values(o)) if (v && typeof v === 'object' && !Array.isArray(v)) for (const k of JSON_KEYS) if (typeof v[k] === 'string' && v[k].trim()) return v[k];
+      return null; };
+    const walk = (o, d) => { if (!o || d > 6 || best) return;
+      if (Array.isArray(o)) { if (o.length >= 3 && o.every(x => x && typeof x === 'object') && nameOf(o[0])) best = o; else o.slice(0, 60).forEach(x => walk(x, d + 1)); }
+      else if (typeof o === 'object') Object.values(o).forEach(v => walk(v, d + 1)); };
+    try { walk(data, 0); } catch (e) {}
+    if (!best) return null;
+    const pick = (o, keys) => { for (const k of keys) if (o[k] != null && o[k] !== '') return o[k]; return ''; };
+    const out = best.map(o => { const name = nameOf(o); if (!name) return null;
+      return { el: null, data: o, title: clean(_dec(name)), url: (() => { const u = pick(o, ['url', 'link', 'href']); return typeof u === 'string' && u ? abs(u) : null; })(),
+        dateText: String(pick(o, ['date', 'published', 'created', 'created_at', 'createdAt', 'actionDate', 'timestamp', 'time']) || ''),
+        description: clean(String(pick(o, ['description', 'desc', 'text', 'summary', 'body', 'content', 'info']) || '')).slice(0, 1500), timerLine: '' }; })
+      .filter(p => p && p.title && !isNoise(p.title));
+    return out.length >= 3 ? out : null;
+  }
+  const jsonVictims = data => _incVictims(data) || _rhVictims(data) || _akVictims(data) || _genericJsonVictims(data);
+  function parseBodyJson() {   // the page itself is a raw JSON feed (analyst opened the API URL)
+    let txt = '';
+    const pre = q1(document, 'pre');
+    if (pre) { const s = clean(pre.textContent).slice(0, 1) ? pre.textContent.trim() : ''; if (s && '{['.includes(s[0])) txt = s; }
+    if (!txt) { const b = (document.body ? document.body.innerText : '') || ''; const s = b.trim(); if (s && '{['.includes(s[0]) && s.length < 50e6) txt = s; }
+    if (!txt) return null;
+    try { return JSON.parse(txt); } catch (e) { return null; }
+  }
+  function tryJsonFeed() {
+    const body = parseBodyJson();
+    if (body) { const posts = jsonVictims(body); if (posts && posts.length) return { name: 'json:page', note: 'raw JSON feed on the page', posts }; }
+    for (const k of Object.keys(window)) { let v; try { v = window[k]; } catch (e) { continue; } if (!v || typeof v !== 'object' || v === window || v.nodeType || k.startsWith('__dumper')) continue;
+      let posts = null; try { posts = jsonVictims(v); } catch (e) {} if (posts && posts.length >= 3) return { name: 'json:global:' + k, note: 'JSON victim feed in window.' + k, posts }; }
+    return null;
+  }
+
   // ---------- capture ----------
   const assets = {};
   async function grab(url) {
@@ -291,7 +357,8 @@
     if (mode === 'custom') r = tryCustom(custom);
     else if (mode.startsWith('profile:')) { const p = D.profiles.find(x => x.name === mode.slice(8)); if (p) { const items = p.item ? qa(document, p.item) : []; const posts = fromItems(items, p, p.name); r = { name: mode, note: p.note, posts }; } }
     else if (mode === 'generic') r = tryGeneric();
-    else r = tryAdapters() || tryProfiles() || tryGeneric() || scriptJson(JSON_KEYS) || (custom ? tryCustom(custom) : null);
+    else if (mode === 'json') r = tryJsonFeed() || scriptJson(JSON_KEYS);
+    else r = tryAdapters() || tryJsonFeed() || tryProfiles() || tryGeneric() || scriptJson(JSON_KEYS) || (custom ? tryCustom(custom) : null);
     result = r || { name: 'none', note: 'no victim list found on this page', posts: [] };
     all = result.posts.map((p, i) => Object.assign({ idx: i }, p));
     return result;
@@ -352,7 +419,7 @@
     const profOpts = D.profiles.map(p => `<option value="profile:${esc(p.name)}">${esc(p.name)}</option>`).join('');
     panel.innerHTML = `
       <header><b>Dumper</b><span id="dumper-count" style="color:#8b929e;flex:1"></span><button id="dumper-close">✕</button></header>
-      <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button></div>
+      <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="json">JSON feed</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button></div>
       <div class="custom" id="dumper-custom"><input type="text" id="c-item" placeholder="item selector (one per victim)"><input type="text" id="c-title" placeholder="title selector"><input type="text" id="c-link" placeholder="link selector"><input type="text" id="c-date" placeholder="date selector"><input type="text" id="c-desc" placeholder="description selector"><button id="c-apply">Apply</button></div>
       <div class="src"></div>
       <div class="bar"><input type="text" id="dumper-q" placeholder="search"><input type="date" id="dumper-from"><input type="date" id="dumper-to"><label class="chk"><input type="checkbox" id="dumper-new"> only not yet dumped</label><label class="chk"><input type="checkbox" id="dumper-detail" checked> fetch each victim's page</label></div>
