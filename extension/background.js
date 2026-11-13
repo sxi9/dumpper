@@ -1,7 +1,14 @@
 // Background: toolbar click -> toggle panel; AI requests from the panel -> Gemini API.
 // The API key, model and consent live in extension storage (Options page), never in the page.
 const api = typeof browser !== 'undefined' ? browser : chrome;
-api.action.onClicked.addListener(tab => { if (tab.id) { const p = api.tabs.sendMessage(tab.id, { type: 'dumper-toggle' }); if (p && p.catch) p.catch(() => {}); } });
+function sendToggle(tabId) { return new Promise((res, rej) => { try { const p = api.tabs.sendMessage(tabId, { type: 'dumper-toggle' }, r => { const e = api.runtime.lastError; e ? rej(e) : res(r); }); if (p && p.then) p.then(res, rej); } catch (e) { rej(e); } }); }
+api.action.onClicked.addListener(async tab => {
+  if (!tab.id) return;
+  try { await sendToggle(tab.id); return; } catch (e) {}
+  // No content script on this page (not a .onion site): inject it now, then open the panel.
+  try { await api.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }); setTimeout(() => sendToggle(tab.id).catch(() => {}), 700); }
+  catch (e) { console.warn('[dumper] cannot inject here:', e && e.message); }
+});
 const DEFAULT_MODEL = 'gemini-2.5-flash';
 function getSettings() { return new Promise(res => { try { const p = api.storage.local.get(['geminiKey', 'geminiKeys', 'geminiModel', 'aiConsent', 'profiles', 'keyState'], v => res(v || {})); if (p && p.then) p.then(res); } catch (e) { res({}); } }); }
 function setSettings(obj) { return new Promise(res => { try { const p = api.storage.local.set(obj, () => res(true)); if (p && p.then) p.then(() => res(true)); } catch (e) { res(false); } }); }
@@ -46,6 +53,7 @@ async function handle(msg) {
   if (msg.kind === 'save-profile') { const profiles = s.profiles || {}; profiles[msg.payload.host] = msg.payload.profile; await setSettings({ profiles }); return { ok: true, count: Object.keys(profiles).length }; }
   if (msg.kind === 'get-profile') { return { profile: (s.profiles || {})[msg.host] || null }; }
   if (msg.kind === 'list-profiles') { return { profiles: s.profiles || {} }; }
+  if (msg.kind === 'open-options') { try { const p = api.runtime.openOptionsPage(); if (p && p.catch) p.catch(() => {}); } catch (e) {} return { ok: true }; }
   if (msg.kind === 'reset-keys') { await setSettings({ keyState: { idx: 0, parked: {}, invalid: {} } }); return { ok: true }; }
   throw new Error('unknown request ' + msg.kind);
 }

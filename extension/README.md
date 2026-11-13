@@ -57,6 +57,16 @@ Chrome; skipped in Tor Browser, where canvas reads are noise) · detail (the vic
 links, images — on by default, same-origin only). Plus `pageCss` (the site's stylesheets) so Claude
 or the Intake page can re-render any card pixel-faithfully.
 
+## Where it works
+- `.onion` sites: the extension loads by itself and the panel opens when victims are found (or after 15 s).
+- Any other site (clearnet mirrors, test pages): click the **Dumper toolbar icon** — it injects the panel
+  on demand into that tab. Pin the icon so it is always visible.
+
+## Options page (API keys)
+Panel → **Options** button, or: Chrome `chrome://extensions` → Dumper → Details → *Extension options*
+(also right-click the icon → Options); Tor Browser / Firefox `about:addons` → Dumper → *Preferences*.
+If the entry is missing, the old version is still loaded: remove the extension and load the new folder.
+
 ## Install (once)
 Chrome / Brave / Edge: `chrome://extensions` → Developer mode → Load unpacked → this folder. Pin it from
 the puzzle-piece menu; the toolbar icon opens/closes the panel.

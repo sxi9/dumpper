@@ -2,6 +2,7 @@
 // relays the toolbar click, and bridges the panel's AI requests to the extension background
 // (window.postMessage <-> runtime.sendMessage). The Gemini key never reaches the page.
 (() => {
+  if (window.__dumperContentLoaded) return; window.__dumperContentLoaded = true;
   const api = typeof browser !== 'undefined' ? browser : chrome;
   const inject = (file, next) => { const s = document.createElement('script'); s.src = api.runtime.getURL(file); s.onload = () => { s.remove(); next && next(); }; (document.head || document.documentElement).appendChild(s); };
   inject('data.js', () => inject('panel.js'));

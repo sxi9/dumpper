@@ -509,7 +509,7 @@
       if (wantDetail && e.url && (() => { try { return new URL(e.url).origin === location.origin && !FILE_RX.test(e.url); } catch (x) { return false; } })()) { e.detail = await detailPage(e.url); await new Promise(r => setTimeout(r, 250)); }
       entries.push(e);
     }
-    const out = { tool: 'dumper 2.1.1', group, site: location.origin, page: location.href, host, profile: result.name, capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: entries.length, entries, assets, pageCss: css, pageTitle: document.title };
+    const out = { tool: 'dumper 2.1.2', group, site: location.origin, page: location.href, host, profile: result.name, capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: entries.length, entries, assets, pageCss: css, pageTitle: document.title };
     const json = JSON.stringify(out); const name = `${group.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-dump-${new Date().toISOString().slice(0, 10)}-${entries.length}.json`;
     const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     const today = new Date().toISOString().slice(0, 10); chosen.forEach(p => done[key(p)] = today); save(LS_DONE, done); window.__dumperLastDump = out; btn.disabled = false;
@@ -528,7 +528,7 @@
     const details = {}; const wantDetail = panel.querySelector('#dumper-detail').checked;
     if (wantDetail) { const same = [...new Set(links.map(l => l.href).filter(h => { try { const u = new URL(h); return u.origin === location.origin && u.pathname !== location.pathname && !FILE_RX.test(h) && !/#/.test(h); } catch (e) { return false; } }))].slice(0, 60); let i = 0; for (const h of same) { i++; status(`Fetching page ${i}/${same.length}…`); details[h] = await detailPage(h); await new Promise(r => setTimeout(r, 250)); } }
     const clone = document.documentElement.cloneNode(true); clone.querySelectorAll('script, #dumper, #dumper-toggle-btn, style').forEach(n => n.remove());
-    const out = { tool: 'dumper 2.1.1', mode: 'wholepage', group, site: location.origin, page: location.href, host, profile: result ? result.name : 'none', capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: 0, entries: [], pageTitle: document.title, pageText: text, mainText: blockText(main), pageHtml: clone.outerHTML, pageCss: css, links, images: imgs, assets, details, iocs: extractIocs(text + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)) };
+    const out = { tool: 'dumper 2.1.2', mode: 'wholepage', group, site: location.origin, page: location.href, host, profile: result ? result.name : 'none', capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: 0, entries: [], pageTitle: document.title, pageText: text, mainText: blockText(main), pageHtml: clone.outerHTML, pageCss: css, links, images: imgs, assets, details, iocs: extractIocs(text + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)) };
     const json = JSON.stringify(out); const name = `${group.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-page-${new Date().toISOString().slice(0, 10)}.json`;
     const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     window.__dumperLastDump = out; btn.disabled = false;
@@ -540,10 +540,10 @@
     panel = document.createElement('div'); panel.id = 'dumper';
     const profOpts = D.profiles.map(p => `<option value="profile:${esc(p.name)}">${esc(p.name)}</option>`).join('');
     panel.innerHTML = `
-      <header><b>Dumper</b><span id="dumper-count" style="color:#8b929e;flex:1"></span><button id="dumper-close">✕</button></header>
+      <header><b>Dumper <span style="color:#8b929e;font-weight:400;font-size:11px">v2.1.2</span></b><span id="dumper-count" style="color:#8b929e;flex:1"></span><button id="dumper-close">✕</button></header>
       <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="json">JSON feed</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button><button id="dumper-pick" title="click one victim card on the page; all blocks shaped like it become the list">Pick a card</button><button id="dumper-whole" title="no list found? dump the entire page (text, HTML, CSS, images, linked pages) for Claude">Dump whole page</button></div>
       <div class="custom" id="dumper-custom"><input type="text" id="c-item" placeholder="item selector (one per victim)"><input type="text" id="c-title" placeholder="title selector"><input type="text" id="c-link" placeholder="link selector"><input type="text" id="c-date" placeholder="date selector"><input type="text" id="c-desc" placeholder="description selector"><button id="c-apply">Apply</button></div>
-      <div class="bar" style="background:#171a22"><span style="color:#8b929e">AI</span><button id="dumper-ai-page" title="send the trimmed page HTML to Gemini and get a selector profile back">Scan page (AI)</button><button id="dumper-ai-card" title="after Pick a card: ask Gemini for the field selectors of that card">Scan card (AI)</button><button id="dumper-ai-fix" title="titles look wrong? ask Gemini to correct the selectors">Fix (AI)</button><button id="dumper-ai-save" disabled>Save profile</button><button id="dumper-ai-copy" disabled>Copy profile JSON</button></div>
+      <div class="bar" style="background:#171a22"><span style="color:#8b929e">AI</span><button id="dumper-ai-page" title="send the trimmed page HTML to Gemini and get a selector profile back">Scan page (AI)</button><button id="dumper-ai-card" title="after Pick a card: ask Gemini for the field selectors of that card">Scan card (AI)</button><button id="dumper-ai-fix" title="titles look wrong? ask Gemini to correct the selectors">Fix (AI)</button><button id="dumper-ai-save" disabled>Save profile</button><button id="dumper-ai-copy" disabled>Copy profile JSON</button><button id="dumper-options" title="API keys, model, consent, saved profiles">Options</button></div>
       <pre id="dumper-ai-out" style="margin:0;padding:4px 12px;color:#8b929e;font:11px ui-monospace,monospace;white-space:pre-wrap;max-height:90px;overflow:auto"></pre>
       <div class="src"></div>
       <div class="bar"><input type="text" id="dumper-q" placeholder="search"><input type="date" id="dumper-from"><input type="date" id="dumper-to"><label class="chk"><input type="checkbox" id="dumper-new"> only not yet dumped</label><label class="chk"><input type="checkbox" id="dumper-detail" checked> fetch each victim's page</label></div>
@@ -557,6 +557,7 @@
     $('dumper-rescan').onclick = () => { if (result && result.name === 'picked') { status('Pick mode result kept. Change the mode box to re-detect.'); return; } extract(state.mode); render(); status(`Rescanned: ${all.length} victim(s) via ${result.name}.`); };
     $('dumper-pick').onclick = startPick;
     $('dumper-ai-page').onclick = () => aiScan('page'); $('dumper-ai-card').onclick = () => aiScan('card'); $('dumper-ai-fix').onclick = () => aiScan('fix'); $('dumper-ai-save').onclick = aiSave; $('dumper-ai-copy').onclick = aiCopy;
+    $('dumper-options').onclick = async () => { const r = await aiCall('open-options', {}, 4000); if (r.error) status('Could not open Options from here: ' + r.error + '. Chrome: chrome://extensions → Dumper → Details → Extension options. Tor/Firefox: about:addons → Dumper → Preferences.'); };
     $('dumper-whole').onclick = dumpWholePage;
     const cst = (load(LS_CUSTOM, {}))[host] || {}; ['item', 'title', 'link', 'date', 'desc'].forEach(k => $('c-' + k).value = cst[k] || '');
     $('c-apply').onclick = () => { const spec = {}; ['item', 'title', 'link', 'date', 'desc'].forEach(k => spec[k] = $('c-' + k).value.trim()); const c = load(LS_CUSTOM, {}); c[host] = spec; save(LS_CUSTOM, c); state.mode = 'custom'; extract('custom'); render(); status(`Custom selectors: ${all.length} victim(s).`); };
@@ -572,10 +573,12 @@
 
   window.__dumper = { aiScan, result: () => result, toggle() { if (!panel) { extract('auto'); build(); return; } panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; }, rescan() { extract(state.mode); render(); } };
   document.addEventListener('dumper-toggle', () => window.__dumper.toggle());
+  const AUTO_OPEN = /\.onion$/i.test(host) || location.protocol === 'file:';   // other sites: the toolbar icon injects + opens the panel
   let tries = 0;
   const wait = setInterval(() => {
+    if (panel) { clearInterval(wait); return; }
     extract('auto');
-    if (all.length) { clearInterval(wait); build(); log('ready:', all.length, 'victims via', result.name); }
-    else if (++tries > 15) { clearInterval(wait); result = { name: 'none', note: 'no victim list found — use "Pick a card", custom selectors, or "Dump whole page"', posts: [] }; all = []; build(); status('Nothing detected automatically. Click "Pick a card" and click one victim on the page, or "Dump whole page".'); log('no victim list detected after 15 s — panel opened for pick / custom / whole-page.'); }
+    if (all.length) { clearInterval(wait); if (AUTO_OPEN) build(); log('ready:', all.length, 'victims via', result.name); }
+    else if (++tries > 15) { clearInterval(wait); result = { name: 'none', note: 'no victim list found — use "Pick a card", custom selectors, or "Dump whole page"', posts: [] }; all = []; if (!AUTO_OPEN) return; build(); status('Nothing detected automatically. Click "Pick a card" and click one victim on the page, or "Dump whole page".'); log('no victim list detected after 15 s — panel opened for pick / custom / whole-page.'); }
   }, 1000);
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dumper",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Universal leak-site dumper: finds the victim list on any leak site (site profiles from leakwatch, generic card detection, custom selectors), groups by date, lets you tick victims and downloads one JSON dump for Claude.",
   "content_scripts": [
     {
@@ -21,7 +21,7 @@
         "panel.js"
       ],
       "matches": [
-        "*://*.onion/*"
+        "<all_urls>"
       ]
     }
   ],
@@ -53,7 +53,8 @@
   },
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*"
