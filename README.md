@@ -22,9 +22,13 @@ finds victims (or click the toolbar icon). Check the *Source* line (which detect
 or a whole date, **Dump selected** → `<group>-dump-<date>-<n>.json` in Downloads.
 
 How victims are found, in order: JS data adapters (The Gentlemen `companies`, any global / `<script>`
-JSON array of victim-like objects such as Leaknet `INIT_DATA`), the leakwatch site profiles
-(fingerprint + item/title/link/date/description selectors), generic card heuristics, and finally
-custom selectors you type in the panel (saved per site). Full details in `extension/README.md`.
+JSON array of victim-like objects such as Leaknet `INIT_DATA`), JSON feeds (INC Ransom, RansomHouse,
+Akira, generic), a profile you saved for the site, the leakwatch site profiles (fingerprint +
+item/title/link/date/description selectors), generic card heuristics, visual structure detection (2.1),
+**Pick a card** (2.1: click one victim block), custom selectors, and **AI assist** (2.1: Gemini scans the
+page or a card and proposes a profile you can test, save and export; several API keys, round robin).
+When nothing lists, **Dump whole page** captures the entire page for offline extraction. Full details in
+`extension/README.md`.
 
 ## Update the site tables
 ```bash

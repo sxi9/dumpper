@@ -75,7 +75,7 @@
       if (n.nodeType === 3) { const t = n.nodeValue.replace(/\s+/g, ' '); if (t.trim()) out.push(t); return; }
       if (n.nodeType !== 1) return;
       const tag = n.tagName.toLowerCase();
-      if (['script', 'style', 'noscript', 'svg', 'template', 'select', 'option'].includes(tag)) return;
+      if (['script', 'style', 'noscript', 'svg', 'template', 'select', 'option'].includes(tag) || n.id === 'dumper' || n.id === 'dumper-toggle-btn') return;
       try { const cs = getComputedStyle(n); if (cs.display === 'none' || cs.visibility === 'hidden') return; } catch (e) {}
       const block = /^(p|div|li|tr|h[1-6]|br|section|article|header|footer|span|a|button|td|th|time|pre|blockquote|label|dt|dd|small|strong|b)$/.test(tag);
       if (block) out.push('\n'); n.childNodes.forEach(walk); if (block) out.push('\n');
@@ -131,7 +131,7 @@
     const out = [];
     for (const c of items) {
       if (!visibleEl(c) && c.tagName !== 'TR') continue;
-      const text = clean(c.textContent); if (text.length < 3 || text.length > 6000) continue;
+      const text = blockText(c).replace(/\n/g, ' '); if (text.length < 3 || text.length > 6000) continue;
       let title = '';
       if (spec.titleOwn) title = ownText(c);
       else if (spec.title) { const t = q1(c, spec.title); title = t ? clean(t.textContent) : ''; }
@@ -175,12 +175,61 @@
     for (const tr of document.querySelectorAll('tr')) { if (tr.closest('thead') || tr.querySelector('th')) continue; const cells = [...tr.querySelectorAll('td')].map(td => clean(td.textContent)).filter(Boolean); if (!cells.length || ['name', 'company', 'date', 'status', '#'].includes(cells[0].toLowerCase())) continue; const title = stripCounters(cells[0]); if (isNoise(title)) continue; rows.push({ el: tr, title, url: cardLink(tr), dateText: (DATE_RX.exec(cells.join(' ')) || [''])[0], description: cells.join(' | ').slice(0, 1500) }); }
     const headings = [];
     for (const h of document.querySelectorAll('h1,h2,h3,h4')) { if (h.closest('#dumper, nav, header, footer, [role="dialog"], .modal')) continue; const t = stripCounters(clean(h.textContent)); if (!t || isNoise(t)) continue; const a = h.querySelector('a[href]') || (h.parentElement && h.parentElement.querySelector('a[href]')); const box = h.closest('article, li, .card, [class*="post"], [class*="item"]') || h.parentElement; headings.push({ el: box || h, title: t, url: a ? abs(a.getAttribute('href')) : null, dateText: (DATE_RX.exec(clean((box || h).textContent)) || [''])[0], description: clean((box || h).textContent).slice(0, 1500) }); }
-    const strategies = [['cards', best], ['table', rows], ['headings', headings]];
+    const visual = visualGroups();
+    const strategies = [['cards', best], ['visual', visual], ['table', rows], ['headings', headings]];
     let [name, posts] = strategies.reduce((a, b) => (b[1].length > a[1].length ? b : a));
     if (name !== 'table' && posts.length < 5 && rows.length) posts = posts.concat(rows);
     const navText = new Set([...document.querySelectorAll('nav a, header a, footer a')].map(a => clean(a.textContent).toLowerCase()));
     posts = posts.filter(p => !navText.has(p.title.toLowerCase()));
     return posts.length ? { name: 'generic:' + name, note: 'heuristic card detection', posts } : null;
+  }
+  // Visual structure detection: repeated blocks of the same rendered shape, whatever their class names.
+  function visualGroups() {
+    const els = [...document.body.querySelectorAll('div, li, article, section, tr, a, td')].filter(e => !e.closest('#dumper')).slice(0, 6000);
+    const groups = {};
+    for (const el of els) {
+      if (el.closest('#dumper, #dumper-toggle-btn, nav, header, footer, [role="dialog"], .modal, script, style')) continue;
+      const r = el.getBoundingClientRect(); if (r.width < 120 || r.height < 36 || r.height > 1500) continue;
+      const text = clean(el.textContent); if (text.length < 10 || text.length > 3000) continue;
+      const kids = [...el.children].slice(0, 6).map(k => k.tagName).join('>'); if (!kids) continue;
+      const key = `${el.tagName}|${Math.round(r.width / 24)}|${kids}|${el.children.length > 6 ? '+' : ''}`;
+      (groups[key] = groups[key] || []).push(el);
+    }
+    let best = [];
+    for (const g of Object.values(groups)) {
+      if (g.length < 3) continue;
+      const members = new Set(g); const leaves = g.filter(el => ![...el.querySelectorAll('*')].some(d => members.has(d)));   // drop containers that wrap other members
+      if (leaves.length < 3) continue;
+      const hs = leaves.map(el => el.getBoundingClientRect().height).sort((a, b) => a - b); if (hs[hs.length - 1] > hs[0] * 6) continue;
+      const got = fromItems(leaves, {}, 'visual'); if (got.length > best.length) best = got;
+    }
+    return best;
+  }
+  // Pick-a-card: the analyst clicks one victim block; every block built the same way becomes the list.
+  function sameShape(el) {
+    const sig = e => e.tagName + '|' + [...e.children].slice(0, 6).map(k => k.tagName).join('>');
+    const target = sig(el); const cls = [...el.classList].filter(c => !/^(active|selected|hover|odd|even|first|last|\d+)$/.test(c));
+    let cands = [];
+    if (cls.length) { try { cands = [...document.querySelectorAll(el.tagName + '.' + cls.map(c => CSS.escape(c)).join('.'))]; } catch (e) {} }
+    if (cands.length < 2 && el.parentElement) cands = [...el.parentElement.children].filter(c => c.tagName === el.tagName);
+    if (cands.length < 2) cands = [...document.querySelectorAll(el.tagName)].filter(c => sig(c) === target && Math.abs(c.getBoundingClientRect().width - el.getBoundingClientRect().width) < 40);
+    cands = cands.filter(c => sig(c) === target || cls.length);
+    const members = new Set(cands); return cands.filter(c => ![...c.querySelectorAll('*')].some(d => members.has(d)));
+  }
+  let picking = false, pickHover = null;
+  function startPick() {
+    if (picking) return; picking = true; status('Pick mode: move over a victim card and click it. Esc cancels.');
+    const over = e => { const el = e.target.closest('div, li, article, section, tr, a, td'); if (!el || el.closest('#dumper, #dumper-toggle-btn')) return; if (pickHover) pickHover.style.outline = ''; pickHover = el; el.style.outline = '3px dashed #e0a23c'; };
+    const stop = () => { picking = false; document.removeEventListener('mouseover', over, true); document.removeEventListener('click', click, true); document.removeEventListener('keydown', key, true); if (pickHover) pickHover.style.outline = ''; pickHover = null; };
+    const click = e => { if (e.target.closest('#dumper, #dumper-toggle-btn')) return; e.preventDefault(); e.stopPropagation(); let el = e.target.closest('div, li, article, section, tr, a, td'); if (!el) return;
+      // climb while the block is tiny (a title inside a card) and the parent is still card-sized
+      for (let i = 0; i < 4 && el.parentElement && el.getBoundingClientRect().height < 60 && el.parentElement.getBoundingClientRect().height < 900 && el.parentElement.tagName !== 'BODY'; i++) el = el.parentElement;
+      stop(); window.__dumperPicked = el; const items = sameShape(el); const posts = fromItems(items, {}, 'picked');
+      result = { name: 'picked', note: `${items.length} block(s) shaped like the one you clicked`, posts }; all = result.posts.map((p, i) => Object.assign({ idx: i }, p));
+      const c = load(LS_CUSTOM, {}); c[host] = Object.assign(c[host] || {}, { pickedTag: el.tagName, pickedClasses: [...el.classList] }); save(LS_CUSTOM, c);
+      render(); status(`Picked: ${all.length} victim(s) from ${items.length} matching block(s). Rescan keeps this; change the mode box to go back to auto.`); };
+    const key = e => { if (e.key === 'Escape') { stop(); status('Pick cancelled.'); } };
+    document.addEventListener('mouseover', over, true); document.addEventListener('click', click, true); document.addEventListener('keydown', key, true);
   }
   function tryAdapters() {
     // The Gentlemen: global `companies`
@@ -222,7 +271,63 @@
       return { el: null, data: o, title, url: ['url', 'link', 'href', 'article_link_name_default'].map(x => o[x]).find(x => typeof x === 'string') ? abs(String(['url', 'link', 'href', 'article_link_name_default'].map(x => o[x]).find(x => typeof x === 'string')).replace(/^(?!https?:|\/)/, 'view_article.php?article=')) : null, dateText: String(['date', 'published', 'created', 'created_at', 'article_published_timestamp', 'timestamp', 'time'].map(x => o[x]).find(x => x) || ''), description: clean([o.article_title, ['description', 'desc', 'text', 'summary', 'body', 'content', 'brief'].map(x => o[x]).find(x => typeof x === 'string')].filter(Boolean).join(' · ')), timerLine: '' }; }).filter(p => p.title && !isNoise(p.title));
     return posts.length >= 3 ? { name: 'adapter:script-json', note: 'JSON literal in a <script> (' + tk + ')', posts } : null;
   }
-  function tryCustom(spec) { if (!spec || !spec.item) return null; const items = qa(document, spec.item); const posts = fromItems(items, spec, 'custom'); return { name: 'custom', note: spec.item, posts }; }
+  function tryRememberedPick(c) {
+    if (!c || !c.pickedTag) return null;
+    const cls = (c.pickedClasses || []).filter(Boolean); let items = [];
+    try { items = cls.length ? [...document.querySelectorAll(c.pickedTag + '.' + cls.map(x => CSS.escape(x)).join('.'))] : []; } catch (e) {}
+    const posts = items.length >= 2 ? fromItems(items, {}, 'picked') : [];
+    return posts.length ? { name: 'picked (remembered)', note: `${items.length} block(s) like the one picked last time`, posts } : null;
+  }
+  // ---------- AI assist: relay to the extension background (content.js bridges window <-> runtime) ----------
+  let aiSeq = 0; const aiWaiters = {};
+  window.addEventListener('message', e => { const m = e.data; if (!m || m.dumper !== 'ai-response' || !aiWaiters[m.id]) return; const w = aiWaiters[m.id]; delete aiWaiters[m.id]; clearTimeout(w.t); w.res(m); });
+  function aiCall(kind, payload, timeoutMs) {
+    return new Promise(res => { const id = 'ai' + (++aiSeq); aiWaiters[id] = { res, t: setTimeout(() => { delete aiWaiters[id]; res({ error: 'no answer from the extension (is it loaded as an extension, not pasted?)' }); }, timeoutMs || 90000) }; window.postMessage({ dumper: 'ai-request', id, kind, payload }, '*'); });
+  }
+  function trimmedHtml(root, cap) {
+    const c = (root || document.body).cloneNode(true);
+    c.querySelectorAll('script, style, noscript, svg, iframe, link, meta, #dumper, #dumper-toggle-btn').forEach(n => n.remove());
+    c.querySelectorAll('*').forEach(n => { for (const a of [...n.attributes]) { if (/^on/i.test(a.name) || a.name === 'style' || a.value.length > 300) n.removeAttribute(a.name); } if (n.tagName === 'IMG') n.setAttribute('src', ''); });
+    let h = c.outerHTML.replace(/\s+/g, ' ').replace(/> </g, '><');
+    if (h.length > cap) h = h.slice(0, cap) + '<!-- truncated -->';
+    return h;
+  }
+  const PROFILE_RULES = `Return ONLY a JSON object: {"name": "<short lowercase id>", "note": "<one line: what template this is>", "fingerprint": "<CSS selector matching ONLY this template>", "item": "<CSS selector of the repeated container, one per victim>", "title": "<CSS selector RELATIVE to item whose text is the organisation name, or "" if the title is the item's own text>", "title_own": false, "link": "<relative selector of an <a> whose href is the victim/post link, or "">", "link_attr": "href", "date": "<relative selector of the publish date element, or "">", "desc": "<relative selector of the description/excerpt element, or "">", "timer": "<relative selector of a countdown/status/button line, or "">", "paginate": "", "sample_titles": ["first 5 victim names these selectors would yield"]}. Rules: item must select exactly one element per victim and nothing else; title must be the organisation name, never a label, button, size, date, country or status; prefer stable class names over nth-child; fingerprint must not be a generic framework class alone (.card, .row, .container).`;
+  function buildAiPrompt(kind, extra) {
+    if (kind === 'page') return `You configure a ransomware leak-site parser. Below is the trimmed HTML of one leak site's victim listing (page title: ${JSON.stringify(document.title)}, URL path ${JSON.stringify(location.pathname)}). Produce a CSS "profile" that extracts one record per victim.\n${PROFILE_RULES}\n\nHTML:\n${trimmedHtml(document.body, 60000)}`;
+    if (kind === 'card') return `You configure a ransomware leak-site parser. Below is the HTML of ONE victim card the analyst clicked on a leak site, followed by up to two sibling cards, and the trimmed page HTML for context. Produce a CSS "profile": "item" must match every card like these across the page; the other selectors are relative to the card.\n${PROFILE_RULES}\n\nCLICKED CARD:\n${extra.card}\n\nSIBLINGS:\n${extra.siblings}\n\nPAGE (trimmed):\n${trimmedHtml(document.body, 25000)}`;
+    return `You fix a ransomware leak-site parser. The current profile ${JSON.stringify(extra.current)} produced these WRONG or noisy victim titles on the page: ${JSON.stringify(extra.badTitles)}. Below are three of the matched items' HTML. Return a corrected profile (same JSON shape) whose "title" selects the organisation name and whose "item" matches one element per victim.\n${PROFILE_RULES}\n\nITEMS:\n${extra.items}\n\nPAGE (trimmed):\n${trimmedHtml(document.body, 25000)}`;
+  }
+  function parseAiJson(text) { try { return JSON.parse(text); } catch (e) {} const m = /\{[\s\S]*\}/.exec(text || ''); if (m) { try { return JSON.parse(m[0]); } catch (e) {} } return null; }
+  function specFromProfile(pr) { return { item: pr.item || '', title: pr.title || '', titleOwn: !!pr.title_own, link: pr.link || '', date: pr.date || '', desc: pr.desc || '', timer: pr.timer || '', name: pr.name || 'ai', note: pr.note || '', fingerprint: pr.fingerprint || '' }; }
+  function testSpec(spec) { const items = qa(document, spec.item); const posts = items.length ? fromItems(items, spec, 'ai') : []; return { items: items.length, posts }; }
+  let aiProfile = null, aiTest = null;
+  async function aiScan(kind) {
+    const st = await aiCall('status', {}, 5000);
+    if (st.error || !st.configured) { status('AI not configured: right-click the Dumper icon → Options, paste one or more Gemini API keys and tick the consent box.' + (st.error ? ' (' + st.error + ')' : '')); return; }
+    if (!st.usable) { status(`All ${st.keys} key(s) are parked or invalid — wait, or "Un-park" them in Options.`); return; }
+    let extra = {};
+    if (kind === 'card') { const el = window.__dumperPicked; if (!el) { status('Pick a card first ("Pick a card"), then "Scan card (AI)".'); return; } const sib = [...el.parentElement.children].filter(x => x !== el).slice(0, 2); extra = { card: trimmedHtml(el, 8000), siblings: sib.map(x => trimmedHtml(x, 4000)).join('\n') }; }
+    if (kind === 'fix') { const items = result && result.posts.slice(0, 3).map(p => p.el).filter(Boolean); if (!items || !items.length) { status('Nothing to fix: no detected items on this page. Try "Scan page (AI)".'); return; } extra = { current: (load(LS_CUSTOM, {}))[host] || { source: result.name }, badTitles: result.posts.slice(0, 8).map(p => p.title), items: items.map(x => trimmedHtml(x, 5000)).join('\n') }; }
+    status(`Asking ${st.model || 'Gemini'} (${st.usable}/${st.keys} key(s) usable, round robin)… page HTML is sent to Google, trimmed, no scripts/images`);
+    const r = await aiCall('generate', { prompt: buildAiPrompt(kind, extra) }, 120000);
+    if (r.error) { status('AI error: ' + r.error); return; }
+    console.log('[dumper] AI answered via key', r.key, `(${r.keyIndex}/${r.keys})`, 'model', r.model); const pr = parseAiJson(r.text); if (!pr || !pr.item) { status('AI returned no usable profile. Raw answer is in the console.'); console.log('[dumper] AI answer:', r.text); return; }
+    aiProfile = pr; const spec = specFromProfile(pr); aiTest = testSpec(spec);
+    panel.querySelector('#dumper-ai-out').textContent = `AI profile "${pr.name}": ${pr.note || ''}\nitem ${pr.item} → ${aiTest.items} element(s), ${aiTest.posts.length} victim(s)\ntitle ${pr.title || '(own text)'} · link ${pr.link || '-'} · date ${pr.date || '-'} · desc ${pr.desc || '-'}\nfirst: ${aiTest.posts.slice(0, 5).map(p => p.title).join(' | ') || '(none)'}`;
+    panel.querySelector('#dumper-ai-save').disabled = !aiTest.posts.length; panel.querySelector('#dumper-ai-copy').disabled = false;
+    if (aiTest.posts.length) { result = { name: 'ai:' + pr.name, note: pr.note || 'AI profile (unsaved)', posts: aiTest.posts }; all = result.posts.map((p, i) => Object.assign({ idx: i }, p)); render(); status(`AI profile found ${aiTest.posts.length} victim(s). Check the titles, then "Save profile" to keep it for this site.`); }
+    else status('AI profile matched nothing on this page. Try "Pick a card" + "Scan card (AI)".');
+  }
+  async function aiSave() {
+    if (!aiProfile) return; const spec = specFromProfile(aiProfile);
+    const c = load(LS_CUSTOM, {}); c[host] = Object.assign(c[host] || {}, spec, { savedAt: new Date().toISOString() }); save(LS_CUSTOM, c);
+    const r = await aiCall('save-profile', { host, profile: Object.assign({}, aiProfile, { host, site: location.origin, savedAt: new Date().toISOString() }) }, 5000);
+    status(r.error ? 'Saved for this site in this browser (extension store unavailable: ' + r.error + ').' : `Profile "${aiProfile.name}" saved for ${host}. Auto mode uses it from now on; "Copy profile JSON" exports it for leakwatch.`);
+  }
+  function aiCopy() { if (!aiProfile) return; const out = { name: aiProfile.name, note: aiProfile.note, fingerprint: aiProfile.fingerprint, item: aiProfile.item, title: aiProfile.title, title_own: !!aiProfile.title_own, link: aiProfile.link || '', link_attr: aiProfile.link_attr || 'href', date: aiProfile.date || '', desc: aiProfile.desc || '', paginate: aiProfile.paginate || '', host, site: location.origin }; const t = JSON.stringify(out, null, 1); navigator.clipboard.writeText(t).then(() => status('Profile JSON copied (leakwatch custom-profile format).'), () => { console.log(t); status('Clipboard blocked — profile JSON printed in the console.'); }); }
+  function tryCustom(spec) { if (!spec || !spec.item) return null; const items = qa(document, spec.item); const posts = fromItems(items, spec, 'custom'); return { name: spec.name ? 'saved:' + spec.name : 'custom', note: spec.note || spec.item, posts }; }
+  const okOrNull = (r, _why) => (r && r.posts.length ? r : null);
 
   // ---------- JSON-feed adapters (ported from leakwatch p_inc_json / p_ransomhouse_json / p_akira_json) ----------
   // Leak sites that serve their victim list as JSON (the API URL shows raw JSON, or the SPA holds it in a global /
@@ -358,7 +463,7 @@
     else if (mode.startsWith('profile:')) { const p = D.profiles.find(x => x.name === mode.slice(8)); if (p) { const items = p.item ? qa(document, p.item) : []; const posts = fromItems(items, p, p.name); r = { name: mode, note: p.note, posts }; } }
     else if (mode === 'generic') r = tryGeneric();
     else if (mode === 'json') r = tryJsonFeed() || scriptJson(JSON_KEYS);
-    else r = tryAdapters() || tryJsonFeed() || tryProfiles() || tryGeneric() || scriptJson(JSON_KEYS) || (custom ? tryCustom(custom) : null);
+    else r = tryAdapters() || tryJsonFeed() || (custom && custom.item ? okOrNull(tryCustom(custom), 'saved profile') : null) || tryProfiles() || tryGeneric() || scriptJson(JSON_KEYS) || tryRememberedPick(custom);
     result = r || { name: 'none', note: 'no victim list found on this page', posts: [] };
     all = result.posts.map((p, i) => Object.assign({ idx: i }, p));
     return result;
@@ -404,7 +509,7 @@
       if (wantDetail && e.url && (() => { try { return new URL(e.url).origin === location.origin && !FILE_RX.test(e.url); } catch (x) { return false; } })()) { e.detail = await detailPage(e.url); await new Promise(r => setTimeout(r, 250)); }
       entries.push(e);
     }
-    const out = { tool: 'dumper 2.0', group, site: location.origin, page: location.href, host, profile: result.name, capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: entries.length, entries, assets, pageCss: css, pageTitle: document.title };
+    const out = { tool: 'dumper 2.1.1', group, site: location.origin, page: location.href, host, profile: result.name, capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: entries.length, entries, assets, pageCss: css, pageTitle: document.title };
     const json = JSON.stringify(out); const name = `${group.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-dump-${new Date().toISOString().slice(0, 10)}-${entries.length}.json`;
     const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     const today = new Date().toISOString().slice(0, 10); chosen.forEach(p => done[key(p)] = today); save(LS_DONE, done); window.__dumperLastDump = out; btn.disabled = false;
@@ -412,6 +517,23 @@
     render();
   }
 
+  async function dumpWholePage() {
+    const btn = panel.querySelector('#dumper-whole'); btn.disabled = true; status('Dumping the whole page…');
+    const group = panel.querySelector('#dumper-group').value.trim() || groupFromHost();
+    const css = await pageCss();
+    const imgs = [...document.images].map(im => abs(im.getAttribute('src'))).filter(Boolean).slice(0, 200); for (const u of imgs) await grab(u);
+    const links = [...document.querySelectorAll('a[href]')].map(a => ({ text: clean(a.textContent), href: abs(a.getAttribute('href')) })).filter(l => l.href && !/^(javascript:|mailto:)/.test(l.href));
+    const main = document.querySelector('main, #content, .content, article') || document.body;
+    const text = blockText(document.body);
+    const details = {}; const wantDetail = panel.querySelector('#dumper-detail').checked;
+    if (wantDetail) { const same = [...new Set(links.map(l => l.href).filter(h => { try { const u = new URL(h); return u.origin === location.origin && u.pathname !== location.pathname && !FILE_RX.test(h) && !/#/.test(h); } catch (e) { return false; } }))].slice(0, 60); let i = 0; for (const h of same) { i++; status(`Fetching page ${i}/${same.length}…`); details[h] = await detailPage(h); await new Promise(r => setTimeout(r, 250)); } }
+    const clone = document.documentElement.cloneNode(true); clone.querySelectorAll('script, #dumper, #dumper-toggle-btn, style').forEach(n => n.remove());
+    const out = { tool: 'dumper 2.1.1', mode: 'wholepage', group, site: location.origin, page: location.href, host, profile: result ? result.name : 'none', capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: 0, entries: [], pageTitle: document.title, pageText: text, mainText: blockText(main), pageHtml: clone.outerHTML, pageCss: css, links, images: imgs, assets, details, iocs: extractIocs(text + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)) };
+    const json = JSON.stringify(out); const name = `${group.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-page-${new Date().toISOString().slice(0, 10)}.json`;
+    const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    window.__dumperLastDump = out; btn.disabled = false;
+    status(`Downloaded ${name} (${(json.length / 1048576).toFixed(1)} MB): full page text, HTML, CSS, ${imgs.length} image(s), ${links.length} link(s)${wantDetail ? ', ' + Object.keys(details).length + ' linked page(s)' : ''}. Claude extracts the victims from it.`);
+  }
   function build() {
     const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
     toggleBtn = document.createElement('button'); toggleBtn.id = 'dumper-toggle-btn'; toggleBtn.textContent = 'Dumper'; toggleBtn.onclick = () => window.__dumper.toggle(); document.body.appendChild(toggleBtn);
@@ -419,8 +541,10 @@
     const profOpts = D.profiles.map(p => `<option value="profile:${esc(p.name)}">${esc(p.name)}</option>`).join('');
     panel.innerHTML = `
       <header><b>Dumper</b><span id="dumper-count" style="color:#8b929e;flex:1"></span><button id="dumper-close">✕</button></header>
-      <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="json">JSON feed</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button></div>
+      <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="json">JSON feed</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button><button id="dumper-pick" title="click one victim card on the page; all blocks shaped like it become the list">Pick a card</button><button id="dumper-whole" title="no list found? dump the entire page (text, HTML, CSS, images, linked pages) for Claude">Dump whole page</button></div>
       <div class="custom" id="dumper-custom"><input type="text" id="c-item" placeholder="item selector (one per victim)"><input type="text" id="c-title" placeholder="title selector"><input type="text" id="c-link" placeholder="link selector"><input type="text" id="c-date" placeholder="date selector"><input type="text" id="c-desc" placeholder="description selector"><button id="c-apply">Apply</button></div>
+      <div class="bar" style="background:#171a22"><span style="color:#8b929e">AI</span><button id="dumper-ai-page" title="send the trimmed page HTML to Gemini and get a selector profile back">Scan page (AI)</button><button id="dumper-ai-card" title="after Pick a card: ask Gemini for the field selectors of that card">Scan card (AI)</button><button id="dumper-ai-fix" title="titles look wrong? ask Gemini to correct the selectors">Fix (AI)</button><button id="dumper-ai-save" disabled>Save profile</button><button id="dumper-ai-copy" disabled>Copy profile JSON</button></div>
+      <pre id="dumper-ai-out" style="margin:0;padding:4px 12px;color:#8b929e;font:11px ui-monospace,monospace;white-space:pre-wrap;max-height:90px;overflow:auto"></pre>
       <div class="src"></div>
       <div class="bar"><input type="text" id="dumper-q" placeholder="search"><input type="date" id="dumper-from"><input type="date" id="dumper-to"><label class="chk"><input type="checkbox" id="dumper-new"> only not yet dumped</label><label class="chk"><input type="checkbox" id="dumper-detail" checked> fetch each victim's page</label></div>
       <div class="bar"><button id="dumper-selvis">Select all shown</button><button id="dumper-clear">Clear</button><button id="dumper-today">Select today</button><button id="dumper-names">Copy names</button><button id="dumper-undone" class="warn">Reset dumped marks</button><button id="dumper-dump" class="pri">Dump selected (0)</button></div>
@@ -430,7 +554,10 @@
     $('dumper-group').value = groupFromHost();
     $('dumper-close').onclick = () => window.__dumper.toggle();
     $('dumper-mode').onchange = e => { state.mode = e.target.value; $('dumper-custom').classList.toggle('show', state.mode === 'custom'); if (state.mode !== 'custom') { extract(state.mode); render(); } };
-    $('dumper-rescan').onclick = () => { extract(state.mode); render(); status(`Rescanned: ${all.length} victim(s) via ${result.name}.`); };
+    $('dumper-rescan').onclick = () => { if (result && result.name === 'picked') { status('Pick mode result kept. Change the mode box to re-detect.'); return; } extract(state.mode); render(); status(`Rescanned: ${all.length} victim(s) via ${result.name}.`); };
+    $('dumper-pick').onclick = startPick;
+    $('dumper-ai-page').onclick = () => aiScan('page'); $('dumper-ai-card').onclick = () => aiScan('card'); $('dumper-ai-fix').onclick = () => aiScan('fix'); $('dumper-ai-save').onclick = aiSave; $('dumper-ai-copy').onclick = aiCopy;
+    $('dumper-whole').onclick = dumpWholePage;
     const cst = (load(LS_CUSTOM, {}))[host] || {}; ['item', 'title', 'link', 'date', 'desc'].forEach(k => $('c-' + k).value = cst[k] || '');
     $('c-apply').onclick = () => { const spec = {}; ['item', 'title', 'link', 'date', 'desc'].forEach(k => spec[k] = $('c-' + k).value.trim()); const c = load(LS_CUSTOM, {}); c[host] = spec; save(LS_CUSTOM, c); state.mode = 'custom'; extract('custom'); render(); status(`Custom selectors: ${all.length} victim(s).`); };
     $('dumper-q').oninput = e => { state.q = e.target.value.toLowerCase(); render(); }; $('dumper-from').onchange = e => { state.from = e.target.value; render(); }; $('dumper-to').onchange = e => { state.to = e.target.value; render(); }; $('dumper-new').onchange = e => { state.onlyNew = e.target.checked; render(); };
@@ -443,12 +570,12 @@
     if (!CANVAS_OK) log('canvas reads are protected (Tor Browser) — card PNGs skipped; cards are rebuilt from cardHtml + pageCss.');
   }
 
-  window.__dumper = { toggle() { if (!panel) { extract('auto'); build(); return; } panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; }, rescan() { extract(state.mode); render(); }, result: () => result };
+  window.__dumper = { aiScan, result: () => result, toggle() { if (!panel) { extract('auto'); build(); return; } panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; }, rescan() { extract(state.mode); render(); } };
   document.addEventListener('dumper-toggle', () => window.__dumper.toggle());
   let tries = 0;
   const wait = setInterval(() => {
     extract('auto');
     if (all.length) { clearInterval(wait); build(); log('ready:', all.length, 'victims via', result.name); }
-    else if (++tries > 120) { clearInterval(wait); log('no victim list detected after 2 min — click the Dumper icon to open the panel and use custom selectors.'); }
+    else if (++tries > 15) { clearInterval(wait); result = { name: 'none', note: 'no victim list found — use "Pick a card", custom selectors, or "Dump whole page"', posts: [] }; all = []; build(); status('Nothing detected automatically. Click "Pick a card" and click one victim on the page, or "Dump whole page".'); log('no victim list detected after 15 s — panel opened for pick / custom / whole-page.'); }
   }, 1000);
 })();

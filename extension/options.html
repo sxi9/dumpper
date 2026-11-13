@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dumper options</title>
+<style>body{font:14px system-ui;max-width:640px;margin:30px auto;padding:0 16px;color:#222}label{display:block;margin:14px 0 4px;font-weight:600}input[type=text],input[type=password]{width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;font:13px ui-monospace,monospace}button{margin-top:16px;padding:8px 14px;border-radius:6px;border:1px solid #2f7d4f;background:#2f7d4f;color:#fff;font:14px system-ui;cursor:pointer}.hint{color:#666;font-size:12px}#msg{margin-left:10px;color:#2f7d4f}pre{background:#f3f3f3;padding:8px;border-radius:6px;font-size:12px;max-height:240px;overflow:auto}</style></head><body>
+<h1>Dumper — AI assist (Gemini)</h1>
+<p class="hint">Used only by the "Scan page (AI)", "Scan card (AI)" and "Fix (AI)" buttons. The key stays in this extension's storage and is sent only to generativelanguage.googleapis.com. Nothing is sent anywhere unless you press one of those buttons.</p>
+<label for="keys">Gemini API keys (one per line — used round robin; a key that hits its quota is parked for 10 minutes and the next one is used)</label><textarea id="keys" rows="4" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;font:13px ui-monospace,monospace" placeholder="AIza…&#10;AIza…"></textarea><div class="hint" id="keystatus"></div>
+<label for="model">Model</label><input id="model" type="text" placeholder="gemini-2.5-flash">
+<label><input id="consent" type="checkbox"> I understand that scanning sends the leak site's trimmed page HTML (no scripts, styles or images) to Google's Gemini API.</label>
+<button id="save">Save</button> <button id="resetkeys" style="background:#555;border-color:#555">Un-park / re-enable all keys</button><span id="msg"></span>
+<h2 style="margin-top:28px">Saved AI profiles</h2>
+<p class="hint">One per site; "Copy profile JSON" in the panel exports a profile for leakwatch.</p>
+<pre id="profiles">(none)</pre><button id="clear" style="background:#7a3b2e;border-color:#7a3b2e">Delete all saved profiles</button>
+<script src="options.js"></script></body></html>

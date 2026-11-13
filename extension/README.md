@@ -19,11 +19,35 @@ to hand to Claude. It never reloads or navigates the page.
    the group name is pre-filled.
 3. **Generic cards** — repeated containers with post/card/item-like class names, table rows, headings
    (ported from leakwatch `parse_auto` with its noise rules).
-4. **Custom selectors** — pick "custom selectors" in the mode box, type an item selector (one per
+4. **Visual structure** (2.1) — repeated blocks of the same rendered shape, whatever their class
+   names (sites with obfuscated or meaningless classes).
+5. **Pick a card** (2.1) — click the button, then click one victim card on the page; every block
+   built the same way becomes the list. Remembered per site.
+6. **Custom selectors** — pick "custom selectors" in the mode box, type an item selector (one per
    victim) and optional title / link / date / description selectors, Apply. Saved per site.
+7. **AI assist** (2.1, optional, Gemini) — **Scan page (AI)** sends the trimmed page HTML to Gemini
+   and gets a selector profile back; **Scan card (AI)** does the same from the card you picked;
+   **Fix (AI)** sends the current wrong titles plus the matched HTML for a corrected profile. The
+   extension tests the answer live (count + first titles) before you **Save profile**; a saved
+   profile wins in auto mode on that site from then on, and **Copy profile JSON** exports it in the
+   leakwatch custom-profile format. Nothing is sent unless you press one of these buttons.
+8. **Dump whole page** (2.1) — when nothing lists, dump the entire page anyway (visible text in
+   order, HTML, CSS, images, links, and the linked same-site pages) so Claude can extract the
+   victims offline.
+
+### AI setup (Options page)
+Right-click the Dumper icon → Options (or `chrome://extensions` → Details → Extension options).
+Paste one or more **Gemini API keys, one per line**: they are used **round robin**; a key that
+answers with a quota / rate-limit error is parked for 10 minutes and the next one is used, an
+invalid key is skipped; "Un-park / re-enable all keys" resets that. Set the model (default
+`gemini-2.5-flash`) and tick the consent box. Keys live in the extension's own storage and are sent
+only to `generativelanguage.googleapis.com` from the extension background — the leak site's page
+never sees them. What is sent: the page's HTML with scripts, styles, images and inline data removed,
+capped at 60 KB (25 KB for card / fix scans).
 
 The mode box also lets you force a specific profile or the generic pass; **Rescan** re-runs detection
-after the page loads more cards. Hovering a victim in the panel outlines its card on the page.
+after the page loads more cards. Hovering a victim in the panel outlines its card on the page. If nothing
+is found after 15 s the panel opens anyway so Pick / AI / whole-page are reachable.
 
 ## What a dump holds (per victim)
 title · url · publishedDate (+ raw dateText) · timerLine (exactly what the card shows, label and value
