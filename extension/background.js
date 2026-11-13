@@ -6,7 +6,7 @@ api.action.onClicked.addListener(async tab => {
   if (!tab.id) return;
   try { await sendToggle(tab.id); return; } catch (e) {}
   // No content script on this page (not a .onion site): inject it now, then open the panel.
-  try { await api.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }); setTimeout(() => sendToggle(tab.id).catch(() => {}), 700); }
+  try { await api.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['content.js'] }); setTimeout(() => sendToggle(tab.id).catch(() => {}), 700); }
   catch (e) { console.warn('[dumper] cannot inject here:', e && e.message); }
 });
 const DEFAULT_MODEL = 'gemini-2.5-flash';

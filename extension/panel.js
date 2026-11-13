@@ -66,8 +66,10 @@
   }
 
   // ---------- DOM helpers ----------
-  const q1 = (root, sel) => { try { return sel ? root.querySelector(sel) : null; } catch (e) { return null; } };
-  const qa = (root, sel) => { try { return sel ? [...root.querySelectorAll(sel)] : []; } catch (e) { return []; } };
+  // Deep queries: also look inside open shadow roots (component-built pages hide their cards there).
+  function shadowRoots(root) { const out = []; const walk = n => { for (const el of n.querySelectorAll('*')) { if (el.shadowRoot) { out.push(el.shadowRoot); walk(el.shadowRoot); } } }; try { walk(root); } catch (e) {} return out; }
+  const q1 = (root, sel) => { try { if (!sel) return null; const d = root.querySelector(sel); if (d) return d; for (const sr of shadowRoots(root)) { const x = sr.querySelector(sel); if (x) return x; } return null; } catch (e) { return null; } };
+  const qa = (root, sel) => { try { if (!sel) return []; const out = [...root.querySelectorAll(sel)]; for (const sr of shadowRoots(root)) out.push(...sr.querySelectorAll(sel)); return out; } catch (e) { return []; } };
   const visibleEl = el => !!el && (el.offsetParent !== null || getComputedStyle(el).position === 'fixed');
   function blockText(root) {    // visible text with line breaks, in document order (the Code-block transcription)
     const out = [];
@@ -160,7 +162,7 @@
   }
   function tryGeneric() {
     const sig = el => el.tagName + '.' + [...el.classList].sort().join('.');
-    const cands = [...document.querySelectorAll('article, div, li, a, section, tr')].filter(el => {
+    const cands = qa(document, 'article, div, li, a, section, tr').filter(el => {
       if (el.closest('#dumper, #dumper-toggle-btn, nav, header, footer, [role="dialog"], .modal')) return false;
       const id = (typeof el.className === 'string' ? el.className : '') + ' ' + (el.id || '');
       return el.tagName === 'ARTICLE' || ITEM_HINT.test(id);
@@ -185,7 +187,7 @@
   }
   // Visual structure detection: repeated blocks of the same rendered shape, whatever their class names.
   function visualGroups() {
-    const els = [...document.body.querySelectorAll('div, li, article, section, tr, a, td')].filter(e => !e.closest('#dumper')).slice(0, 6000);
+    const els = qa(document.body, 'div, li, article, section, tr, a, td').filter(e => !e.closest('#dumper')).slice(0, 6000);
     const groups = {};
     for (const el of els) {
       if (el.closest('#dumper, #dumper-toggle-btn, nav, header, footer, [role="dialog"], .modal, script, style')) continue;
@@ -231,6 +233,7 @@
     const key = e => { if (e.key === 'Escape') { stop(); status('Pick cancelled.'); } };
     document.addEventListener('mouseover', over, true); document.addEventListener('click', click, true); document.addEventListener('keydown', key, true);
   }
+  const isOwnData = v => v === D || v === D.profiles || v === D.hosts || (v && v.profiles === D.profiles);
   function tryAdapters() {
     // The Gentlemen: global `companies`
     try { if (typeof companies !== 'undefined' && Array.isArray(companies) && companies.length && companies[0].title !== undefined) {
@@ -241,7 +244,7 @@
     } } catch (e) {}
     // Any global array of victim-like objects, or a JSON literal inside a <script> (Leaknet INIT_DATA style)
     const KEYS = ['title', 'name', 'company', 'company_name', 'victim', 'target', 'organization', 'domain', 'website', 'article_title', 'headline', 'subject_site', 'company_title'];
-    try { for (const k of Object.keys(window)) { let v; try { v = window[k]; } catch (e) { continue; } if (!v || typeof v !== 'object' || v === window || v.nodeType || k.startsWith('__dumper') || k === 'companies') continue;
+    try { for (const k of Object.keys(window)) { let v; try { v = window[k]; } catch (e) { continue; } if (!v || typeof v !== 'object' || v === window || v.nodeType || k.startsWith('__dumper') || k === 'companies' || /^\d+$/.test(k) || isOwnData(v)) continue; try { if (v.window === v) continue; } catch (e) { continue; }
       const found = []; const walk = (o, depth) => { if (!o || depth > 4 || found.length) return; if (Array.isArray(o)) { if (o.length >= 3 && o.every(x => x && typeof x === 'object') && KEYS.some(kk => typeof o[0][kk] === 'string')) found.push(o); else o.slice(0, 30).forEach(x => walk(x, depth + 1)); } else if (typeof o === 'object' && !o.nodeType) Object.values(o).slice(0, 60).forEach(x => walk(x, depth + 1)); };
       try { walk(v, 0); } catch (e) {} if (!found.length) continue; v = found[0]; const tk = KEYS.find(x => typeof v[0][x] === 'string'); if (!tk) continue;
       const posts = v.map(o => ({ el: null, data: o, title: clean(o[tk]), url: ['url', 'link', 'href'].map(x => o[x]).find(x => typeof x === 'string') ? abs(['url', 'link', 'href'].map(x => o[x]).find(x => typeof x === 'string')) : null, dateText: String(['date', 'published', 'created', 'created_at', 'timestamp', 'time'].map(x => o[x]).find(x => x) || ''), description: clean(['description', 'desc', 'text', 'summary', 'body', 'content'].map(x => o[x]).find(x => typeof x === 'string') || ''), timerLine: '' })).filter(p => p.title && !isNoise(p.title));
@@ -250,6 +253,7 @@
   }
   const JSON_KEYS = ['title', 'name', 'company', 'company_name', 'victim', 'target', 'organization', 'domain', 'website', 'article_title', 'headline', 'subject_site', 'company_title'];
   function scriptJson(KEYS) {
+    const ownNames = new Set(D.profiles.map(p => p.name));
     const found = [];
     const walk = (o, depth) => { if (!o || depth > 6) return; if (Array.isArray(o)) { if (o.length >= 3 && o.every(x => x && typeof x === 'object') && KEYS.some(k => typeof o[0][k] === 'string')) found.push(o); else o.slice(0, 50).forEach(x => walk(x, depth + 1)); } else if (typeof o === 'object') Object.values(o).forEach(v => walk(v, depth + 1)); };
     for (const sc of document.querySelectorAll('script:not([src])')) {
@@ -266,7 +270,7 @@
       if (found.length) break;
     }
     if (!found.length) return null;
-    const arr = found.sort((a, b) => b.length - a.length)[0]; const tk = KEYS.find(k => typeof arr[0][k] === 'string');
+    const arr = found.filter(a => !a.some(o => ownNames.has(o.name) && o.fp)).sort((a, b) => b.length - a.length)[0]; if (!arr) return null; const tk = KEYS.find(k => typeof arr[0][k] === 'string');
     const posts = arr.map(o => { const site = typeof o.subject_site === 'string' ? o.subject_site : ''; let title = clean(o[tk] || ''); if (tk === 'article_title' && site && !/tinyurl|news/.test(site)) title = site.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
       return { el: null, data: o, title, url: ['url', 'link', 'href', 'article_link_name_default'].map(x => o[x]).find(x => typeof x === 'string') ? abs(String(['url', 'link', 'href', 'article_link_name_default'].map(x => o[x]).find(x => typeof x === 'string')).replace(/^(?!https?:|\/)/, 'view_article.php?article=')) : null, dateText: String(['date', 'published', 'created', 'created_at', 'article_published_timestamp', 'timestamp', 'time'].map(x => o[x]).find(x => x) || ''), description: clean([o.article_title, ['description', 'desc', 'text', 'summary', 'body', 'content', 'brief'].map(x => o[x]).find(x => typeof x === 'string')].filter(Boolean).join(' · ')), timerLine: '' }; }).filter(p => p.title && !isNoise(p.title));
     return posts.length >= 3 ? { name: 'adapter:script-json', note: 'JSON literal in a <script> (' + tk + ')', posts } : null;
@@ -390,8 +394,9 @@
   function tryJsonFeed() {
     const body = parseBodyJson();
     if (body) { const posts = jsonVictims(body); if (posts && posts.length) return { name: 'json:page', note: 'raw JSON feed on the page', posts }; }
-    for (const k of Object.keys(window)) { let v; try { v = window[k]; } catch (e) { continue; } if (!v || typeof v !== 'object' || v === window || v.nodeType || k.startsWith('__dumper')) continue;
-      let posts = null; try { posts = jsonVictims(v); } catch (e) {} if (posts && posts.length >= 3) return { name: 'json:global:' + k, note: 'JSON victim feed in window.' + k, posts }; }
+    for (const k of Object.keys(window)) { let v; try { v = window[k]; } catch (e) { continue; } if (!v || typeof v !== 'object' || v === window || v.nodeType || k.startsWith('__dumper') || /^\d+$/.test(k) || isOwnData(v)) continue;
+      try { if (v.window === v) continue; } catch (e) { continue; }   // child frame windows
+      let posts = null; try { posts = jsonVictims(v); } catch (e) {} if (posts && posts.length >= 3 && !posts.some(x => D.profiles.some(pr => pr.name === x.title))) return { name: 'json:global:' + k, note: 'JSON victim feed in window.' + k, posts }; }
     return null;
   }
 
@@ -450,7 +455,7 @@
     #dumper .row{display:flex;gap:8px;padding:5px 12px;align-items:flex-start;border-bottom:1px solid #1d2129}#dumper .row:hover{background:#1a1e26}#dumper .row .n{font-weight:600;color:#fff}#dumper .row .m{color:#8b929e;font-size:11px}
     #dumper .row .done{color:#e0a23c;font-size:10px;border:1px solid #e0a23c;border-radius:4px;padding:0 4px;margin-left:6px}#dumper footer{padding:8px 12px;border-top:1px solid #2a2e37;color:#8b929e;font-size:11px;min-height:34px}
     #dumper .custom{display:none;flex-wrap:wrap;gap:6px;padding:8px 12px;border-bottom:1px solid #2a2e37}#dumper .custom.show{display:flex}#dumper .custom input{min-width:90px}
-    #dumper-toggle-btn{position:fixed;top:12px;right:12px;z-index:2147483001;background:#e0a23c;color:#14161b;font:600 12px system-ui;border:0;border-radius:6px;padding:6px 10px;cursor:pointer;box-shadow:0 2px 8px #0008}`;
+    #dumper-toggle-btn{position:fixed;top:12px;right:12px;z-index:2147483001;background:#4ba3a0;color:#0f2a29;font:600 12px system-ui;border:0;border-radius:6px;padding:6px 10px;cursor:pointer;box-shadow:0 2px 8px #0008}`;
   let all = [], result = null, panel, toggleBtn, sel = new Set(load(LS_SEL, [])), done = load(LS_DONE, {});
   const state = { q: '', from: '', to: '', onlyNew: false, mode: 'auto' };
   const key = p => host + '|' + p.title.toLowerCase();
@@ -466,10 +471,12 @@
     else r = tryAdapters() || tryJsonFeed() || (custom && custom.item ? okOrNull(tryCustom(custom), 'saved profile') : null) || tryProfiles() || tryGeneric() || scriptJson(JSON_KEYS) || tryRememberedPick(custom);
     result = r || { name: 'none', note: 'no victim list found on this page', posts: [] };
     all = result.posts.map((p, i) => Object.assign({ idx: i }, p));
+    if (!all.length && IS_TOP && Object.keys(frameResults).length) mergeFrames();
     return result;
   }
   function visibleList() { return all.filter(p => (!state.q || (p.title + ' ' + p.description).toLowerCase().includes(state.q)) && (!state.from || dateOf(p) >= state.from) && (!state.to || dateOf(p) <= state.to) && (!state.onlyNew || !done[key(p)])); }
   function render() {
+    if (!panel) return; if (!result) result = { name: 'scanning', note: 'looking for the victim list', posts: [] };
     const L = panel.querySelector('.list'); L.innerHTML = '';
     const list = visibleList(); const groups = {}; list.forEach(p => (groups[dateOf(p)] = groups[dateOf(p)] || []).push(p));
     for (const d of Object.keys(groups).sort().reverse()) {
@@ -485,7 +492,7 @@
         L.appendChild(r);
       }
     }
-    panel.querySelector('.src').innerHTML = `Source: <b>${esc(result.name)}</b> — ${esc(result.note || '')} · group from site list: <b>${esc(groupFromHost())}</b>`;
+    panel.querySelector('.src').innerHTML = `Source: <b>${esc(result ? result.name : 'scanning')}</b> — ${esc(result.note || '')} · group from site list: <b>${esc(groupFromHost())}</b>`;
     counts();
   }
   function counts() { panel.querySelector('#dumper-count').textContent = `${visibleList().length} shown · ${all.length} total · ${[...sel].filter(k => all.some(p => key(p) === k)).length} selected`; panel.querySelector('#dumper-dump').textContent = `Dump selected (${[...sel].filter(k => all.some(p => key(p) === k)).length})`; }
@@ -503,13 +510,13 @@
       for (const u of imgs) await grab(u);
       const links = el ? [...el.querySelectorAll('a[href]')].map(a => ({ text: clean(a.textContent), href: abs(a.getAttribute('href')) })).filter(l => l.href && !/^(javascript:|mailto:)/.test(l.href)) : (p.mediaLinks || []).map(h => ({ text: 'media', href: h }));
       const tl = p.timerLine || (el ? timerLine(el) : '');
-      const leakText = el ? blockText(el) : [p.title, p.description, tl].filter(Boolean).join('\n');
-      const e = { title: p.title, url: p.url || null, publishedDate: parseDate(p.dateText) || null, dateText: p.dateText || null, timerLine: tl, description: p.description || '', descriptionHtml: p.descriptionHtml || null, leakText, links, mediaLinks: links.map(l => l.href).filter(h => !/\.onion/.test(h) || /\/(media|files?|download)/i.test(h)), iocs: extractIocs(leakText + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)), logoUrl: imgs[0] || null, images: imgs, pinned: !!p.pinned, cardHtml: el ? el.outerHTML.replace(/<script[\s\S]*?<\/script>/gi, '') : null, cardPng: el ? await cardPng(el) : null, extra: p.extra || null, raw: p.data || null };
+      const leakText = p.leakText || (el ? blockText(el) : [p.title, p.description, tl].filter(Boolean).join('\n'));
+      const e = { title: p.title, url: p.url || null, publishedDate: parseDate(p.dateText) || null, dateText: p.dateText || null, timerLine: tl, description: p.description || '', descriptionHtml: p.descriptionHtml || null, leakText, links, mediaLinks: links.map(l => l.href).filter(h => !/\.onion/.test(h) || /\/(media|files?|download)/i.test(h)), iocs: extractIocs(leakText + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)), logoUrl: imgs[0] || null, images: imgs, pinned: !!p.pinned, cardHtml: el ? el.outerHTML.replace(/<script[\s\S]*?<\/script>/gi, '') : (p.cardHtml || null), frame: p.fromFrame || null, cardPng: el ? await cardPng(el) : null, extra: p.extra || null, raw: p.data || null };
       if (result.gentlemen && !e.cardPng) e.cardPng = null;
       if (wantDetail && e.url && (() => { try { return new URL(e.url).origin === location.origin && !FILE_RX.test(e.url); } catch (x) { return false; } })()) { e.detail = await detailPage(e.url); await new Promise(r => setTimeout(r, 250)); }
       entries.push(e);
     }
-    const out = { tool: 'dumper 2.1.3', group, site: location.origin, page: location.href, host, profile: result.name, capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: entries.length, entries, assets, pageCss: css, pageTitle: document.title };
+    const out = { tool: 'dumper 2.1.4', group, site: location.origin, page: location.href, host, profile: result.name, capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: entries.length, entries, assets, pageCss: css, pageTitle: document.title };
     const json = JSON.stringify(out); const name = `${group.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-dump-${new Date().toISOString().slice(0, 10)}-${entries.length}.json`;
     const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     const today = new Date().toISOString().slice(0, 10); chosen.forEach(p => done[key(p)] = today); save(LS_DONE, done); window.__dumperLastDump = out; btn.disabled = false;
@@ -528,11 +535,27 @@
     const details = {}; const wantDetail = panel.querySelector('#dumper-detail').checked;
     if (wantDetail) { const same = [...new Set(links.map(l => l.href).filter(h => { try { const u = new URL(h); return u.origin === location.origin && u.pathname !== location.pathname && !FILE_RX.test(h) && !/#/.test(h); } catch (e) { return false; } }))].slice(0, 60); let i = 0; for (const h of same) { i++; status(`Fetching page ${i}/${same.length}…`); details[h] = await detailPage(h); await new Promise(r => setTimeout(r, 250)); } }
     const clone = document.documentElement.cloneNode(true); clone.querySelectorAll('script, #dumper, #dumper-toggle-btn, style').forEach(n => n.remove());
-    const out = { tool: 'dumper 2.1.3', mode: 'wholepage', group, site: location.origin, page: location.href, host, profile: result ? result.name : 'none', capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: 0, entries: [], pageTitle: document.title, pageText: text, mainText: blockText(main), pageHtml: clone.outerHTML, pageCss: css, links, images: imgs, assets, details, iocs: extractIocs(text + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)) };
+    const out = { tool: 'dumper 2.1.4', mode: 'wholepage', group, site: location.origin, page: location.href, host, profile: result ? result.name : 'none', capturedAt: new Date().toISOString(), canvasTrusted: CANVAS_OK, count: 0, entries: [], pageTitle: document.title, pageText: text, mainText: blockText(main), pageHtml: clone.outerHTML, pageCss: css, links, images: imgs, assets, details, iocs: extractIocs(text + ' ' + links.map(l => l.href).join(' '), links.map(l => l.href)) };
     const json = JSON.stringify(out); const name = `${group.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-page-${new Date().toISOString().slice(0, 10)}.json`;
     const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
     window.__dumperLastDump = out; btn.disabled = false;
     status(`Downloaded ${name} (${(json.length / 1048576).toFixed(1)} MB): full page text, HTML, CSS, ${imgs.length} image(s), ${links.length} link(s)${wantDetail ? ', ' + Object.keys(details).length + ' linked page(s)' : ''}. Claude extracts the victims from it.`);
+  }
+  function diagnose() {
+    const sig = el => el.tagName + '.' + [...el.classList].sort().join('.');
+    const groups = {}; qa(document, 'article, div, li, a, section, tr').forEach(el => { if (el.closest('#dumper')) return; const k = sig(el); groups[k] = (groups[k] || 0) + 1; });
+    const top = Object.entries(groups).filter(([k, n]) => n >= 3 && k.includes('.')).sort((a, b) => b[1] - a[1]).slice(0, 25);
+    const profilesTried = D.profiles.filter(p => p.fp && p.fp.length && p.fp.every(sel => q1(document, sel))).map(p => p.name);
+    const d = { tool: 'dumper 2.1.4 diagnose', url: location.href, host, title: document.title, group: groupFromHost(), capturedAt: new Date().toISOString(),
+      result: result ? { name: result.name, note: result.note, count: result.posts.length, first: result.posts.slice(0, 5).map(p => p.title) } : null,
+      elements: document.getElementsByTagName('*').length, iframes: [...document.querySelectorAll('iframe')].map(f => f.src || '(inline)'), shadowRoots: shadowRoots(document).length, frameResults: Object.keys(frameResults),
+      bodyTextChars: (document.body.innerText || '').length, appShell: !!document.querySelector('#root, #app, #__next, #__nuxt'), repeatedSignatures: top, profilesWhoseFingerprintMatched: profilesTried,
+      globalsWithArrays: Object.keys(window).filter(k => { try { const v = window[k]; return Array.isArray(v) && v.length >= 3 && typeof v[0] === 'object'; } catch (e) { return false; } }).slice(0, 20),
+      visibleTextSample: blockText(document.body).slice(0, 4000), htmlSample: trimmedHtml(document.body, 30000) };
+    const json = JSON.stringify(d, null, 1); const name = `dumper-diagnose-${host || 'page'}-${new Date().toISOString().slice(0, 10)}.json`;
+    const blob = new Blob([json], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    console.log('[dumper] diagnose:', d); status(`Downloaded ${name} — send it to Claude; it shows what the page looks like to the detector.`);
+    return d;
   }
   function build() {
     const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
@@ -540,10 +563,10 @@
     panel = document.createElement('div'); panel.id = 'dumper';
     const profOpts = D.profiles.map(p => `<option value="profile:${esc(p.name)}">${esc(p.name)}</option>`).join('');
     panel.innerHTML = `
-      <header><b>Dumper <span style="color:#8b929e;font-weight:400;font-size:11px">v2.1.3</span></b><span id="dumper-count" style="color:#8b929e;flex:1"></span><button id="dumper-close">✕</button></header>
-      <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="json">JSON feed</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button><button id="dumper-pick" title="click one victim card on the page; all blocks shaped like it become the list">Pick a card</button><button id="dumper-whole" title="no list found? dump the entire page (text, HTML, CSS, images, linked pages) for Claude">Dump whole page</button></div>
+      <header><b>Dumper <span style="color:#8b929e;font-weight:400;font-size:11px">v2.1.4</span></b><span id="dumper-count" style="color:#8b929e;flex:1"></span><button id="dumper-close">✕</button></header>
+      <div class="bar"><span style="color:#8b929e">Group</span><input type="text" id="dumper-group"><select id="dumper-mode" title="how victims are detected"><option value="auto">auto-detect</option><option value="json">JSON feed</option><option value="generic">generic cards</option><option value="custom">custom selectors</option>${profOpts}</select><button id="dumper-rescan" title="re-run detection">Rescan</button><button id="dumper-pick" title="click one victim card on the page; all blocks shaped like it become the list">Pick a card</button><button id="dumper-whole" title="no list found? dump the entire page (text, HTML, CSS, images, linked pages) for Claude">Dump whole page</button><button id="dumper-diag" title="download a small report of what this page looks like to the detector">Diagnose</button></div>
       <div class="custom" id="dumper-custom"><input type="text" id="c-item" placeholder="item selector (one per victim)"><input type="text" id="c-title" placeholder="title selector"><input type="text" id="c-link" placeholder="link selector"><input type="text" id="c-date" placeholder="date selector"><input type="text" id="c-desc" placeholder="description selector"><button id="c-apply">Apply</button></div>
-      <div class="bar" style="background:#171a22"><span style="color:#8b929e">AI</span><button id="dumper-ai-page" title="send the trimmed page HTML to Gemini and get a selector profile back">Scan page (AI)</button><button id="dumper-ai-card" title="after Pick a card: ask Gemini for the field selectors of that card">Scan card (AI)</button><button id="dumper-ai-fix" title="titles look wrong? ask Gemini to correct the selectors">Fix (AI)</button><button id="dumper-ai-save" disabled>Save profile</button><button id="dumper-ai-copy" disabled>Copy profile JSON</button><button id="dumper-options" title="API keys, model, consent, saved profiles">Options</button></div>
+      <div class="bar" style="background:#171a22"><span style="color:#8b929e">AI</span><button id="dumper-ai-page" title="send the trimmed page HTML to Gemini and get a selector profile back">Scan page (AI)</button><button id="dumper-ai-card" title="after Pick a card: ask Gemini for the field selectors of that card">Scan card (AI)</button><button id="dumper-ai-fix" title="titles look wrong? ask Gemini to correct the selectors">Fix (AI)</button><button id="dumper-ai-save" disabled>Save profile</button><button id="dumper-ai-copy" disabled>Copy profile JSON</button><button id="dumper-options" title="API keys, model, consent, saved profiles">Options</button><label class="chk" title="when nothing is detected, ask Gemini for a profile automatically (once per site)"><input type="checkbox" id="dumper-autoai"> auto AI</label></div>
       <pre id="dumper-ai-out" style="margin:0;padding:4px 12px;color:#8b929e;font:11px ui-monospace,monospace;white-space:pre-wrap;max-height:90px;overflow:auto"></pre>
       <div class="src"></div>
       <div class="bar"><input type="text" id="dumper-q" placeholder="search"><input type="date" id="dumper-from"><input type="date" id="dumper-to"><label class="chk"><input type="checkbox" id="dumper-new"> only not yet dumped</label><label class="chk"><input type="checkbox" id="dumper-detail" checked> fetch each victim's page</label></div>
@@ -554,9 +577,10 @@
     $('dumper-group').value = groupFromHost();
     $('dumper-close').onclick = () => window.__dumper.toggle();
     $('dumper-mode').onchange = e => { state.mode = e.target.value; $('dumper-custom').classList.toggle('show', state.mode === 'custom'); if (state.mode !== 'custom') { extract(state.mode); render(); } };
-    $('dumper-rescan').onclick = () => { if (result && result.name === 'picked') { status('Pick mode result kept. Change the mode box to re-detect.'); return; } extract(state.mode); render(); status(`Rescanned: ${all.length} victim(s) via ${result.name}.`); };
-    $('dumper-pick').onclick = startPick;
+    $('dumper-rescan').onclick = () => { [...document.querySelectorAll('iframe')].forEach(f => { try { f.contentWindow.postMessage({ dumper: 'frame-rescan' }, '*'); } catch (e) {} }); if (result && result.name === 'picked') { status('Pick mode result kept. Change the mode box to re-detect.'); return; } extract(state.mode); render(); status(`Rescanned: ${all.length} victim(s) via ${result.name}.`); };
+    $('dumper-pick').onclick = startPick; $('dumper-diag').onclick = diagnose;
     $('dumper-ai-page').onclick = () => aiScan('page'); $('dumper-ai-card').onclick = () => aiScan('card'); $('dumper-ai-fix').onclick = () => aiScan('fix'); $('dumper-ai-save').onclick = aiSave; $('dumper-ai-copy').onclick = aiCopy;
+    $('dumper-autoai').checked = autoAiOn(); $('dumper-autoai').onchange = e => { save(LS_AUTOAI, e.target.checked); status(e.target.checked ? 'Auto AI on: when nothing is detected, Gemini is asked for a profile automatically.' : 'Auto AI off.'); };
     $('dumper-options').onclick = async () => { const r = await aiCall('open-options', {}, 4000); if (r.error) status('Could not open Options from here: ' + r.error + '. Chrome: chrome://extensions → Dumper → Details → Extension options. Tor/Firefox: about:addons → Dumper → Preferences.'); };
     $('dumper-whole').onclick = dumpWholePage;
     const cst = (load(LS_CUSTOM, {}))[host] || {}; ['item', 'title', 'link', 'date', 'desc'].forEach(k => $('c-' + k).value = cst[k] || '');
@@ -571,14 +595,36 @@
     if (!CANVAS_OK) log('canvas reads are protected (Tor Browser) — card PNGs skipped; cards are rebuilt from cardHtml + pageCss.');
   }
 
-  window.__dumper = { aiScan, result: () => result, toggle() { if (!panel) { extract('auto'); build(); return; } panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; }, rescan() { extract(state.mode); render(); } };
+  const IS_TOP = window === window.top;
+  let frameResults = {};
+  if (!IS_TOP) {
+    // child frame: no UI; detect and hand the text-level results to the top window
+    const report = () => { const r = extract('auto'); if (!r.posts.length) return false; const posts = r.posts.map(p => ({ title: p.title, url: p.url, dateText: p.dateText, description: p.description, timerLine: p.timerLine || (p.el ? timerLine(p.el) : ''), leakText: p.el ? blockText(p.el) : [p.title, p.description].filter(Boolean).join('\n'), cardHtml: p.el ? p.el.outerHTML.slice(0, 20000) : null, links: p.el ? [...p.el.querySelectorAll('a[href]')].map(a => ({ text: clean(a.textContent), href: abs(a.getAttribute('href')) })) : [] }));
+      window.top.postMessage({ dumper: 'frame-result', frame: location.href, name: r.name, posts }, '*'); return true; };
+    let t = 0; const iv = setInterval(() => { if (report() || ++t > 20) clearInterval(iv); }, 1500);
+    window.addEventListener('message', e => { if (e.data && e.data.dumper === 'frame-rescan') report(); });
+    window.__dumper = { frame: true }; return;
+  }
+  window.addEventListener('message', e => { const m = e.data; if (!m || m.dumper !== 'frame-result') return; frameResults[m.frame] = m; log('frame', m.frame, 'reported', m.posts.length, 'victim(s) via', m.name);
+    if (panel && (!result || !result.posts.length || result.name.startsWith('frame'))) { mergeFrames(); render(); status(`List found inside an embedded frame (${m.frame}).`); } });
+  function mergeFrames() { const posts = []; for (const f of Object.values(frameResults)) for (const p of f.posts) posts.push(Object.assign({ el: null, fromFrame: f.frame }, p)); if (posts.length) { result = { name: 'frame:' + Object.values(frameResults)[0].name, note: `${Object.keys(frameResults).length} embedded frame(s)`, posts }; all = posts.map((p, i) => Object.assign({ idx: i }, p)); } }
+  const LS_AUTOAI = 'dumper.autoai.v1'; const autoAiOn = () => load(LS_AUTOAI, true); const aiTried = new Set();
+  async function autoAi(reason) {
+    if (!autoAiOn() || aiTried.has(host)) return; aiTried.add(host);
+    const st = await aiCall('status', {}, 5000); if (st.error || !st.configured || !st.usable) { status(`Nothing detected (${reason}). Auto AI is on but no usable Gemini key is configured — see Options, or use Pick a card / Dump whole page.`); return; }
+    status(`Nothing detected (${reason}) — asking Gemini for a profile automatically…`); await aiScan('page');
+  }
+  window.__dumper = { aiScan, result: () => result, diagnose, toggle() { if (!panel) { extract('auto'); build(); if (!all.length) { status('Scanning the page for a victim list…'); setTimeout(() => { if (!all.length) autoAi('nothing on this page'); }, 4000); } return; } panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; }, rescan() { extract(state.mode); render(); } };
   document.addEventListener('dumper-toggle', () => window.__dumper.toggle());
-  const AUTO_OPEN = /\.onion$/i.test(host) || location.protocol === 'file:';   // other sites: the toolbar icon injects + opens the panel
+  const AUTO_OPEN = /\.onion$/i.test(host) || location.protocol === 'file:';
+  // pages that build their list late (SPA, infinite scroll): re-detect on DOM growth for 90 s when the panel has nothing
+  let lastNodes = 0, growTimer = null; const mo = new MutationObserver(() => { clearTimeout(growTimer); growTimer = setTimeout(() => { const n = document.getElementsByTagName('*').length; if (n === lastNodes) return; lastNodes = n; if (panel && result && !result.posts.length && state.mode === 'auto') { extract('auto'); if (all.length) { render(); status(`Page changed — found ${all.length} victim(s) via ${result.name}.`); } } }, 800); });
+  try { mo.observe(document.documentElement, { childList: true, subtree: true }); setTimeout(() => mo.disconnect(), 90000); } catch (e) {}   // other sites: the toolbar icon injects + opens the panel
   let tries = 0;
+  if (AUTO_OPEN && IS_TOP) { extract('auto'); build(); if (!all.length) status('Scanning the page for a victim list…'); }
   const wait = setInterval(() => {
-    if (panel) { clearInterval(wait); return; }
     extract('auto');
-    if (all.length) { clearInterval(wait); if (AUTO_OPEN) build(); log('ready:', all.length, 'victims via', result.name); }
-    else if (++tries > 15) { clearInterval(wait); result = { name: 'none', note: 'no victim list found — use "Pick a card", custom selectors, or "Dump whole page"', posts: [] }; all = []; if (!AUTO_OPEN) return; build(); status('Nothing detected automatically. Click "Pick a card" and click one victim on the page, or "Dump whole page".'); log('no victim list detected after 15 s — panel opened for pick / custom / whole-page.'); }
+    if (all.length) { clearInterval(wait); if (AUTO_OPEN && !panel) build(); else if (panel) { render(); status(`Found ${all.length} victim(s) via ${result.name}.`); } log('ready:', all.length, 'victims via', result.name); }
+    else if (++tries > 15) { clearInterval(wait); result = { name: 'none', note: 'no victim list found — use "Pick a card", custom selectors, or "Dump whole page"', posts: [] }; all = []; if (!AUTO_OPEN && !panel) return; if (!panel) build(); render(); autoAi('15 s, no list'); status('Nothing detected automatically. Click "Pick a card" and click one victim on the page, or "Dump whole page".'); log('no victim list detected after 15 s — panel opened for pick / custom / whole-page.'); }
   }, 1000);
 })();

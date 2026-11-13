@@ -31,7 +31,14 @@ to hand to Claude. It never reloads or navigates the page.
    extension tests the answer live (count + first titles) before you **Save profile**; a saved
    profile wins in auto mode on that site from then on, and **Copy profile JSON** exports it in the
    leakwatch custom-profile format. Nothing is sent unless you press one of these buttons.
-8. **Dump whole page** (2.1) — when nothing lists, dump the entire page anyway (visible text in
+8. **Always open + auto AI** (2.1.4) — on `.onion` pages the panel opens at once and fills as detection
+   runs; if nothing is found within 15 s (or after a toolbar click on an empty page) and Gemini keys are
+   configured, **Scan page (AI)** runs by itself once per site ("auto AI" toggle in the AI row).
+8b. **Embedded frames and shadow DOM** (2.1.4) — lists inside an `<iframe>` are detected in the frame
+   and shown in the top panel; open shadow roots are searched too; pages that build their list late are
+   re-scanned for 90 s. **Diagnose** downloads a small report of what the page looks like to the detector
+   — send it to Claude when a site still yields nothing.
+9. **Dump whole page** (2.1) — when nothing lists, dump the entire page anyway (visible text in
    order, HTML, CSS, images, links, and the linked same-site pages) so Claude can extract the
    victims offline.
 
