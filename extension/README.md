@@ -61,6 +61,10 @@ or the Intake page can re-render any card pixel-faithfully.
 - `.onion` sites: the extension loads by itself and the panel opens when victims are found (or after 15 s).
 - Any other site (clearnet mirrors, test pages): click the **Dumper toolbar icon** — it injects the panel
   on demand into that tab. Pin the icon so it is always visible.
+- Chrome asks once at install for "read and change data on all websites": that is what lets the icon
+  work on any site. **Tor Browser / Firefox** do not grant it automatically: open `about:addons` →
+  Dumper → **Permissions** and switch on *Access your data for all websites* (and the .onion one),
+  otherwise neither the automatic panel nor the icon can run on the page.
 
 ## Options page (API keys)
 Panel → **Options** button, or: Chrome `chrome://extensions` → Dumper → Details → *Extension options*
